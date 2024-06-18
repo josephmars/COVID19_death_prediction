@@ -1,0 +1,315 @@
+---
+title: "COVID-19 Proyect"
+date: "22/5/2020"
+output: html_document
+---
+
+# {.tabset}
+## Datos
+```{r Paquetes, include=FALSE}
+library(caret)
+library(lubridate)
+library(tidyverse)
+library(ROSE)
+library(pROC)
+library(knitr)
+library(randomForest)
+library(dummies)
+library(ISLR)
+library(e1071)
+library(doSNOW)
+```
+```{r}
+covid <- read.csv("20200518-sitrep-84-covid-19.csv")
+kable(head(covid,100), digits = 4)
+```
+
+## Limpieza de datos
+
+**Limpieza de datos**
+```{r warning=FALSE}
+#Limpieza inicial
+covid<- covid %>% filter(atención=="Recuperado"|atención=="Fallecido") %>%
+  rename(Fecha.de.notificacion=Fecha.de.notificación,Ciudad=Ciudad.de.ubicación, Atencion=atención,
+               Pais.de.procedencia=País.de.procedencia) %>%
+  select(-ID.de.caso, -Codigo.DIVIPOLA, -fecha.reporte.web, -Ciudad)
+
+#Aplicación de formato fecha
+covid$Fecha.de.notificacion<-dmy(covid$Fecha.de.notificacion)
+covid$Fecha.de.muerte<-dmy(covid$Fecha.de.muerte)
+covid$Fecha.diagnostico<-dmy(covid$Fecha.diagnostico)
+covid$Fecha.recuperado<-dmy(covid$Fecha.recuperado)
+covid$FIS<-dmy(covid$FIS)
+
+#Variable días enfermo
+dias_enfermo <- 0
+for (i in 1:nrow(covid)) {
+  if (is.na(covid$Fecha.recuperado[i])==FALSE) {
+    dias_enfermo[i]<-covid$Fecha.recuperado[i]-covid$Fecha.diagnostico[i]
+    
+  }else{
+    
+    dias_enfermo[i]<-covid$Fecha.de.muerte[i]-covid$Fecha.diagnostico[i]
+    
+    
+  }
+}
+covid$dias_enfermo <- dias_enfermo
+covid <- filter(covid, dias_enfermo>=0)
+#Variable días hasta el diagnóstico
+covid$dias_respuesta<-covid$Fecha.diagnostico-covid$Fecha.de.notificacion
+
+#Variable días con síntomas
+dias_con_sint <- 0
+for (i in 1:nrow(covid)) {
+  if (is.na(covid$FIS[i])==FALSE) {
+    if (is.na(covid$Fecha.recuperado[i])==FALSE) {
+      dias_con_sint[i]<-covid$Fecha.recuperado[i]-covid$FIS[i]
+      
+    }else{
+      dias_con_sint[i]<-covid$Fecha.de.muerte[i]-covid$FIS[i]
+    }
+  }
+  else{
+    dias_con_sint[i]<-0
+  }
+  
+}
+covid$dias_con_sintomas <-  dias_con_sint
+
+#Variable días hasta notificación
+dias_cuidado<-0
+for (i in 1:nrow(covid)) {
+  if (is.na(covid$FIS[i])==FALSE) {
+    dias_cuidado[i]<-covid$Fecha.de.notificacion[i]-covid$FIS[i]
+    
+  }else{
+    dias_cuidado[i] <- 0
+  }
+  
+}
+covid$dias_hasta_notificacion <- dias_cuidado
+
+#Eliminación de fechas
+covid <- select(covid, -Fecha.de.notificacion, -FIS, -Fecha.de.muerte,
+                -Fecha.diagnostico, -Fecha.recuperado)
+
+#Cambio de NA a cero
+covid[is.na(covid$dias_enfermo),8] <- 0
+covid[is.na(covid$dias_respuesta),9] <- 0
+covid[is.na(covid$dias_con_sintomas),10] <- 0
+covid[is.na(covid$dias_hasta_notificacion),11] <- 0
+```
+
+## {.tabset}
+
+
+**Balanceo de datos**
+```{r}
+write.csv(covid,file = "covid.csv")
+covid <- read.csv("covid.csv")[,-1]
+barplot(table(covid$Atencion))
+covid <- ROSE(Atencion~., covid, seed = 3)$data
+barplot(table(covid$Atencion))
+```
+
+```{r, echo = FALSE}
+kable(head(covid,10), "pandoc",align = "c",
+      caption = "Base de datos limpia", digits = 2)
+```
+
+**Validación cruzada**
+```{r}
+train_rows <- createDataPartition(y = covid$Edad, p = 0.8, list = F)
+
+data_train <- covid[train_rows,]
+data_test <- covid[-train_rows,]
+
+c(nrow(data_train), nrow(data_test))
+
+#Exportación  e importación (para los niveles eliminados)
+write.csv(data_train,file = "data_train.csv")
+write.csv(data_test,file = "data_test.csv")
+
+data_train <- read.csv("data_train.csv")[,-1]
+data_test <- read.csv("data_test.csv")[,-1]
+
+#Comprobación de los datos
+str(data_train)
+
+```
+
+
+### Regresión Logística
+**Modelo**
+```{r}
+logReg <- glm(Atencion~Departamento.o.Distrito.+Edad+Sexo+Tipo+dias_enfermo+dias_respuesta+dias_con_sintomas+dias_hasta_notificacion,
+              data=data_train, family=binomial("logit"))
+
+sum <- summary(logReg)
+kable(sum$coefficients)
+```
+**Probabilidades predichas**
+```{r}
+data_test$tethahat <- predict(logReg, newdata = data_test, type="response")
+data_test$tethahat <- as.numeric(data_test$tethahat)
+kable(head(data_test$tethahat,6, digits = 3))
+```
+**Curva ROC y AUC**
+```{r}
+ROC <- roc(data_test$Atencion~data_test$tethahat)
+Matt <- data.frame(ROC$thresholds,ROC$sensitivities,ROC$specificities)
+kable(head(Matt,6), digits = 3)
+
+nbest<-which.max(abs(Matt$ROC.sensitivities +Matt$ROC.specificities-1)) 
+tethabest <- Matt[nbest,]
+tethacorte<-tethabest[1,1]
+
+plot(ROC,main="Curva ROC y mejor tetha de corte, AUC = 0.9228")
+points(tethabest[3],tethabest[2],col="red",pch=20)
+
+```
+
+**Matriz de confusión**
+```{r warning=FALSE}
+
+data_test$yhat[data_test$tethahat>=tethacorte]<-"Recuperado"
+data_test$yhat[data_test$tethahat<tethacorte]<-"Fallecido"
+ 
+caret::confusionMatrix(table(data_test$yhat,data_test$Atencion))
+
+```
+
+
+
+### Random Forest
+```{r message=FALSE, warning=FALSE}
+set.seed(222)
+
+datos_reg<-read.csv("datos_limpios.csv", sep = ";")
+datos_reg<-datos_reg[,-1]
+datos_reg<-datos_reg[,-6]
+datos_reg<-datos_reg[,-6]
+datos_reg<-datos_reg[,-9]
+indexes <- createDataPartition(datos_reg$atencion,
+                               times = 1,
+                               p = 0.7,
+                               list = FALSE)
+
+data.train <- datos_reg[indexes,]
+data.test <- datos_reg[-indexes,]
+str(data.train)
+table(data.test$Departamento.o.Distrito.)
+rf<-randomForest(atencion~.,data=data.train)
+rf
+p1<-predict(rf,data.train)
+head(p1)
+
+
+head(data.train$atencion)
+confusionMatrix(p1,data.train$atencion)
+
+#prediction test data
+p2<-predict(rf,data.test)
+confusionMatrix(p2,data.test$atencion)
+
+#BALANCEANDO LOS DATOS
+library(ROSE)
+over<-ovun.sample(atencion~.,data=data.train,method="over",N=5464)$data
+table(over$atencion)
+rf2<-randomForest(atencion~.,data=over)
+p3<-predict(rf2,over)
+confusionMatrix(p3,over$atencion)
+
+p4<-predict(rf2,data.test)
+confusionMatrix(p4,data.test$atencion)
+
+plot(rf2)
+
+#Numero de nodos
+hist(treesize(rf2),main="N?mero de nodos para los arboles",col="blue")
+
+#Importancia de variables
+varImpPlot(rf2,sort=T, main="Top Variables Importantes")
+importance(rf2)
+
+#Partial Plot
+partialPlot(rf2,data.train,Edad,"Fallecido")
+
+```
+
+## KNN
+```{r} 
+datos=read.csv(file = "datos_limpios.csv", sep = ";")
+ 
+datos <- ROSE(atencion~.,datos,seed=3)$data 
+
+normalize <- function(x){ 
+  return((x-min(x))/(max(x)-min(x)))
+}
+
+a1=dummy(datos$Departamento.o.Distrito.,sep = "_")
+
+a2=dummy(datos$Sexo,sep = "_")
+
+a3=dummy(datos$Tipo,sep = "_")
+
+Edad=normalize(datos$Edad)
+
+DiasAn=normalize(datos$dias.analizar.prueba)
+
+DiasEnf=normalize(datos$dias.enfermo)
+
+DiasAntNot=normalize(datos$dias.antes.notificar)
+
+DiasDPrimer=normalize(datos$dias.desde.primer.caso)
+
+n=nrow(datos)
+
+trows=sample(1:n,0.7*n)
+
+atencion=datos$atencion
+
+alldata=data.frame(cbind(atencion,a1,a2,a3,Edad,DiasAn,DiasEnf,DiasAntNot,DiasDPrimer))
+
+Datafix=datos[trows,]
+
+train=alldata[trows,]
+
+train$atencion=Datafix$atencion
+
+testFix=datos[-trows,]
+
+test=alldata[-trows,]
+
+test$atencion=testFix$atencion
+
+trainX <- train[,names(train) != "atencion"]
+
+preProcValues <- preProcess(x = trainX,method = c("center", "scale"))
+
+ctrl <- trainControl(method="repeatedcv",repeats = 3)
+```
+
+
+
+```{r,include=FALSE,warning=FALSE}
+knnFit <- train(atencion ~ ., data = train, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+```
+ 
+
+
+```{r}
+
+knnFit
+
+plot(knnFit)
+
+knnPredict <- predict(knnFit,newdata = test )
+
+confusionMatrix(knnPredict, test$atencion )
+
+mean(knnPredict == test$atencion)
+```
+

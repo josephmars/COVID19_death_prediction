@@ -1,9 +1,19 @@
+# Data files
+data/
+Bootstraping/Antioquia.RDS
+Bootstraping/Bogota
+Bootstraping/Other Departments
+Bootstraping/Valle
+Bootstraping/data_clean.csv
+Bootstraping/data_clean.xlsx
+
+
 # History files
 .Rhistory
 .Rapp.history
 
 # Session Data files
-.RData
+*.RData
 .RDataTmp
 
 # User-specific files
