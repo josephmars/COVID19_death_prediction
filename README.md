@@ -1,2 +1,21 @@
-# COVID19_death_prediction
-![image](https://github.com/josephmars/COVID19_death_prediction/assets/58085173/d8b44ca0-32af-458e-8b7f-913ac10ffc85)
+# Prediction of risk of death by COVID19 
+## Joseph Martinez (2020)
+
+Shiny app to predict the risk of death by COVID-19 based on demographic data. It leverages the classification model SVM trained on public available data from the Colombian Ministry of Health. The app is in Spanish.
+
+![App diagram](docs/images/diagram.png)
+
+Demographic data:
+- Age
+- Sex
+- City and department
+- Days before notification of symptoms
+
+How to run the app:
+1. Clone the repository
+2. You can run the app by running `shiny::runApp("app")` in R.
+
+## Acknowledgments
+- Data provided by the Colombian Ministry of Health.
+- Model trained togethr with the Analytics Research Lab of the Universidad del Norte.
+
