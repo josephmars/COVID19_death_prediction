@@ -1,5 +1,4 @@
-# Prediction of risk of death by COVID19 
-## Joseph Martinez (2020)
+# Prediction of risk of death by COVID19 (2020)
 
 Shiny app to predict the risk of death by COVID-19 based on demographic data. It leverages the classification model SVM trained on public available data from the Colombian Ministry of Health. The app is in Spanish.
 
